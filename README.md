@@ -160,3 +160,22 @@ Released under the MIT License. See the LICENSE file.
 
 \- Incubator: N/A
 
+## Machine Learning Model
+
+GlucoTwin AI includes a Random Forest classifier trained on synthetically generated health and lifestyle data. The prototype combines baseline health information with manually entered readings and lifestyle inputs to demonstrate a digital-twin workflow.
+
+**Demo model evaluation on synthetic test data:**
+- Accuracy: 97.3%
+- ROC-AUC: 0.979
+- Precision for the positive class: 0.42
+- Recall for the positive class: 0.71
+- F1-score for the positive class: 0.53
+
+These results are from synthetic data and do not establish clinical accuracy or real-world health risk prediction. The current prototype does not connect to live wearable devices and is not intended for diagnosis or treatment.
+
+### Current Limitations and Future Work
+- Integrate real, appropriately consented health datasets.
+- Connect supported wearable devices or sensor APIs for continuous readings.
+- Validate predictions with appropriate clinical expertise and independent data.
+- Improve event prediction and evaluate false alarms before considering real-world use.
+- Add privacy, consent, and secure health-data handling mechanisms.

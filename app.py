@@ -1,37 +1,105 @@
 
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.express as px
+from pathlib import Path
 from datetime import datetime, timedelta
+
+import joblib
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import streamlit as st
 
 st.set_page_config(
     page_title="GlucoTwin AI",
     page_icon="🩺",
-    layout="wide"
+    layout="wide",
 )
+
+MODEL_PATH = Path("model_outputs/glucotwin_model.joblib")
 
 st.title("🩺 GlucoTwin AI")
-st.subheader("Healthcare Digital Twin Prototype")
+st.subheader("Healthcare Digital Twin — Experimental Prototype")
 
 st.warning(
-    "Educational demo only. All data are synthetic. "
-    "Not intended for diagnosis or treatment."
+    "Research demonstration only. The model uses synthetic training data "
+    "and synthetic event labels. Its probability is NOT a real patient's "
+    "medical risk and must not guide diagnosis or treatment."
 )
 
+if not MODEL_PATH.exists():
+    st.error("Model file not found. Run `python train_model.py` first.")
+    st.stop()
+
+saved = joblib.load(MODEL_PATH)
+model = saved["model"]
+features = saved["features"]
+
 with st.sidebar:
-    st.header("Virtual Patient Controls")
+    st.header("Virtual Patient")
+
     patient_id = st.text_input("Demo Patient ID", "DEMO-001")
     age = st.slider("Age", 18, 85, 42)
-    baseline = st.slider("Baseline glucose (mg/dL)", 70, 160, 98)
-    carbs = st.slider("Simulated carbohydrate intake (g)", 0, 120, 45, 5)
-    activity = st.selectbox("Activity", ["Low", "Moderate", "High"])
-    sleep = st.slider("Sleep (hours)", 2.0, 10.0, 7.0, 0.5)
-    stress = st.selectbox("Stress", ["Low", "Moderate", "High"])
+    baseline = st.slider("Baseline glucose (mg/dL)", 65, 180, 105)
+    hba1c = st.slider("HbA1c (%) — synthetic input", 4.0, 10.5, 5.8, 0.1)
+    previous_diabetes = st.selectbox(
+        "Previous diabetes diagnosis (demo)",
+        ["No", "Yes"],
+    )
 
-activity_effect = {"Low": 8, "Moderate": 0, "High": -8}[activity]
-stress_effect = {"Low": -2, "Moderate": 3, "High": 8}[stress]
-sleep_effect = (7 - sleep) * 1.2
+    st.header("Dynamic Sensor / Lifestyle Inputs")
+    current_glucose = st.slider(
+        "Current glucose (mg/dL)", 55, 280, 125
+    )
+    carbs = st.slider("Carbohydrate intake (g)", 0, 150, 45, 5)
+    steps = st.slider("Steps in the last hour", 0, 1800, 500, 50)
+    heart_rate = st.slider("Heart rate (bpm)", 45, 140, 76)
+    hrv = st.slider("Heart-rate variability (ms)", 8, 100, 42)
+    sleep = st.slider("Sleep (hours)", 2.0, 10.0, 7.0, 0.5)
+    stress = st.slider("Stress score (1–10)", 1, 10, 4)
+
+activity = (
+    "High" if steps >= 1000
+    else "Moderate" if steps >= 400
+    else "Low"
+)
+
+inputs = {
+    "age": age,
+    "baseline_glucose": baseline,
+    "hba1c": hba1c,
+    "previous_diabetes": int(previous_diabetes == "Yes"),
+    "carbs_g": carbs,
+    "steps_last_hour": steps,
+    "sleep_hours": sleep,
+    "stress_score": stress,
+    "current_glucose": current_glucose,
+    "heart_rate": heart_rate,
+    "hrv_ms": hrv,
+}
+
+input_df = pd.DataFrame([inputs], columns=features)
+
+probability = float(model.predict_proba(input_df)[0][1])
+predicted_event = int(model.predict(input_df)[0])
+
+col1, col2, col3 = st.columns(3)
+col1.metric("Virtual Patient", patient_id)
+col2.metric("Current Demo Glucose", f"{current_glucose} mg/dL")
+col3.metric(
+    "Model Output",
+    "Synthetic event flagged" if predicted_event else "Synthetic event not flagged",
+)
+
+st.markdown("### Experimental Model Output")
+st.progress(probability)
+st.write(f"Model probability for the **synthetic event label**: {probability:.1%}")
+
+st.caption(
+    "This is a model output on user-entered demonstration inputs, "
+    "not a validated medical risk estimate. It does not predict a "
+    "clinically established outcome."
+)
+
+st.markdown("### Synthetic Glucose Trend")
 
 rng = np.random.default_rng(21)
 now = datetime.now()
@@ -40,108 +108,47 @@ times = [
     for i in range(24)
 ]
 
-meal_effect = carbs * 0.35
-starting_value = (
-    baseline
-    + meal_effect * 0.45
-    + activity_effect * 0.25
-    + stress_effect
-    + sleep_effect
-)
-
 readings = []
 for i in range(24):
     wave = 7 * np.sin(i / 3) + rng.normal(0, 4)
-    meal_wave = meal_effect * np.exp(-((i - 18) / 3.5) ** 2) * 0.55
-    value = starting_value + wave + meal_wave
-    readings.append(round(max(60, value), 1))
+    meal_wave = carbs * 0.12 * np.exp(-((i - 18) / 3.5) ** 2)
+    value = current_glucose + wave + meal_wave
+    readings.append(round(float(np.clip(value, 50, 300)), 1))
 
 history = pd.DataFrame({
     "Time": times,
-    "Glucose (mg/dL)": readings
+    "Synthetic glucose (mg/dL)": readings,
 })
 
-latest = float(history["Glucose (mg/dL)"].iloc[-1])
-
-estimate = np.clip(
-    latest
-    + meal_effect * 0.35
-    + stress_effect
-    + sleep_effect
-    + activity_effect * 0.35,
-    60,
-    300
-)
-
-if estimate >= 180:
-    status = "Elevated demo alert"
-elif estimate >= 140:
-    status = "Moderate demo alert"
-else:
-    status = "Lower demo alert"
-
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Patient Twin", patient_id)
-col2.metric("Age", age)
-col3.metric("Latest Synthetic Glucose", f"{latest:.0f} mg/dL")
-col4.metric("Illustrative Estimate", f"{estimate:.0f} mg/dL")
-
-st.write("### Virtual Patient Status")
-st.write(status)
-
-st.caption(
-    "The estimate is a simple illustrative heuristic, "
-    "not a trained or clinically validated prediction model."
-)
-
-st.write("### Synthetic Glucose History")
-
-chart = px.line(
+fig = px.line(
     history,
     x="Time",
-    y="Glucose (mg/dL)",
+    y="Synthetic glucose (mg/dL)",
     markers=True,
-    title="Simulated glucose readings"
+    title="Illustrative synthetic time series",
 )
-chart.add_hline(
-    y=180,
-    line_dash="dash",
-    annotation_text="Illustrative alert threshold"
-)
-st.plotly_chart(chart, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
-st.write("### Simulated Health Inputs")
-
+st.markdown("### Inputs Supplied to the Model")
 st.dataframe(
     pd.DataFrame({
-        "Input": [
-            "Glucose history",
-            "Carbohydrate intake",
-            "Activity",
-            "Sleep",
-            "Stress"
-        ],
-        "Current demo value": [
-            f"{latest:.1f} mg/dL",
-            f"{carbs} g",
-            activity,
-            f"{sleep} hours",
-            stress
-        ]
+        "Feature": list(inputs.keys()),
+        "Value": list(inputs.values()),
     }),
     hide_index=True,
-    use_container_width=True
+    width="stretch",
 )
 
 st.download_button(
-    "Download Synthetic Data CSV",
+    "Download synthetic glucose CSV",
     data=history.to_csv(index=False).encode("utf-8"),
-    file_name="glucotwin_history.csv",
-    mime="text/csv"
+    file_name="glucotwin_synthetic_history.csv",
+    mime="text/csv",
 )
 
 st.info(
-    "This is a demonstration using synthetic values. "
-    "Real healthcare use would require suitable data, "
-    "clinical validation, and privacy safeguards."
+    "The current prototype combines historical-style demo inputs with "
+    "simulated dynamic readings. It does not connect to a real wearable, "
+    "medical record, or live sensor. Clinical use would require real, "
+    "appropriately governed data and independent validation."
 )
